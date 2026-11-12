@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 单元测试只依赖 numpy / Pillow / pytest，不安装 torch 等大依赖
+      - name: Install test dependencies
+        run: pip install pytest numpy pillow
+
+      - name: Byte-compile all sources
+        run: python -m compileall -q . -x "(^|/)(legacy|\.git)/"
+
+      - name: Run tests
+        run: python -m pytest -q

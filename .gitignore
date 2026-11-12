@@ -1,0 +1,71 @@
+# ============================================================
+# 细粒度姿态可控的人体图像生成 —— 公开仓库忽略规则
+# ============================================================
+
+# ---- 操作系统 / 编辑器 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.ipynb_checkpoints/
+
+# ---- 虚拟环境 / 本地配置 ----
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+
+# ---- 模型权重与缓存（体积大，改用 README 中的下载方式）----
+models/
+checkpoints/
+ckpts/
+*.ckpt
+*.safetensors
+*.pth
+*.pt
+*.bin
+.huggingface/
+.cache/
+
+# ---- 运行产物 ----
+.gradio/
+flagged/
+outputs/
+gradio_cached_examples/
+*.log
+*.tmp
+*.tmp.*
+
+# ---- 本机备份 / 草稿 ----
+*.bak
+*.orig
+*.rej
+
+# ---- 原始素材目录（已挑选副本到 assets/，原件不入库）----
+/test_images/
+/test_poses/
+/results/
+/new-pipeline.png
+/pipeline-new.docx
+
+# ---- 项目内部资料：含个人与学校信息，禁止公开 ----
+# （如需公开研究报告，请先脱敏后放入 docs/ 再调整本段）
+西北工业大学细粒度姿态可控的人体图像生成-申报书.doc
+细粒度姿态可控的人体图像生成_结题报告_最终版.doc
+细粒度姿态可控的人体图像生成-研究报告.docx
+采购发票.pdf
+关于公布2026年大学生创新训练计划项目结题验收结果的通知-合并.pdf

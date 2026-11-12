@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>细粒度本地骨架编辑器 (离线版)</title>
+    <style>
+        body { 
+            background: #1e1e2e; color: #cdd6f4; 
+            display: flex; flex-direction: column; align-items: center; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            margin: 0; padding: 20px;
+        }
+        canvas { 
+            border: 2px solid #45475a; background: black; 
+            margin-top: 10px; cursor: crosshair;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            border-radius: 8px;
+        }
+        .controls { margin-top: 20px; display: flex; gap: 15px; }
+        button { 
+            padding: 10px 20px; font-size: 16px; font-weight: bold; cursor: pointer; 
+            background: #89b4fa; color: #1e1e2e; border: none; border-radius: 5px; 
+            transition: all 0.2s;
+        }
+        button:hover { background: #b4befe; transform: translateY(-2px); }
+        .hint { color: #a6adc8; font-size: 14px; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <h2>🦴 纯离线 ControlNet 骨架拖拽台</h2>
+    <p class="hint">鼠标直接拖拽下方关节点即可修改姿态。修改完毕后，点击下载并将图片上传到 WebUI 的生图框中。</p>
+    
+    <canvas id="poseCanvas" width="512" height="512"></canvas>
+    
+    <div class="controls">
+        <button onclick="resetPose()">🔄 恢复默认姿态</button>
+        <button onclick="saveImage()">📥 下载骨架图 (传给WebUI)</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('poseCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 标准 OpenPose 18个关键点的默认位置 (基于 512x512 画布的 A-Pose)
+        const defaultPoints = [
+            {x: 256, y: 70},  // 0: 鼻子
+            {x: 256, y: 120}, // 1: 脖子
+            {x: 180, y: 120}, // 2: 右肩
+            {x: 160, y: 220}, // 3: 右肘
+            {x: 140, y: 310}, // 4: 右腕
+            {x: 332, y: 120}, // 5: 左肩
+            {x: 352, y: 220}, // 6: 左肘
+            {x: 372, y: 310}, // 7: 左腕
+            {x: 216, y: 270}, // 8: 右胯
+            {x: 200, y: 380}, // 9: 右膝
+            {x: 180, y: 480}, // 10: 右踝
+            {x: 296, y: 270}, // 11: 左胯
+            {x: 312, y: 380}, // 12: 左膝
+            {x: 332, y: 480}, // 13: 左踝
+            {x: 240, y: 60},  // 14: 右眼
+            {x: 272, y: 60},  // 15: 左眼
+            {x: 220, y: 65},  // 16: 右耳
+            {x: 292, y: 65}   // 17: 左耳
+        ];
+
+        // 深拷贝一份当前节点
+        let points = JSON.parse(JSON.stringify(defaultPoints));
+
+        // ControlNet 识别所需的标准骨架连接线和对应颜色 (RGB Hex)
+        const limbs = [
+            [1, 2, '#ff0000'], [1, 5, '#ff5500'], [2, 3, '#ffaa00'], [3, 4, '#ffff00'],
+            [5, 6, '#aaff00'], [6, 7, '#55ff00'], [1, 8, '#00ff00'], [8, 9, '#00ff55'],
+            [9, 10, '#00ffaa'], [1, 11, '#00ffff'], [11, 12, '#00aaff'], [12, 13, '#0055ff'],
+            [1, 0, '#0000ff'], [0, 14, '#5500ff'], [14, 16, '#aa00ff'], [0, 15, '#ff00ff'], [15, 17, '#ff00aa']
+        ];
+
+        let draggingPoint = null;
+
+        // 核心渲染函数
+        function draw() {
+            // 背景必须是纯黑，否则 ControlNet 识别会出错
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 画骨架连接线
+            ctx.lineWidth = 10;
+            ctx.lineCap = 'round';
+            limbs.forEach(limb => {
+                const p1 = points[limb[0]];
+                const p2 = points[limb[1]];
+                ctx.strokeStyle = limb[2];
+                ctx.beginPath();
+                ctx.moveTo(p1.x, p1.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.stroke();
+            });
+
+            // 画关节点
+            points.forEach((p, index) => {
+                // 面部节点稍微画小一点
+                ctx.fillStyle = index > 13 ? '#ffffff' : '#ffffff'; 
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, index > 13 ? 3 : 5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        // 鼠标按下：寻找距离鼠标最近的关节点
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            for (let i = 0; i < points.length; i++) {
+                const dx = points[i].x - mouseX;
+                const dy = points[i].y - mouseY;
+                // 检测半径设为 15 像素，方便点击
+                if (dx * dx + dy * dy < 225) { 
+                    draggingPoint = i;
+                    break;
+                }
+            }
+        });
+
+        // 鼠标移动：更新关节点坐标并重绘
+        canvas.addEventListener('mousemove', (e) => {
+            if (draggingPoint !== null) {
+                const rect = canvas.getBoundingClientRect();
+                points[draggingPoint].x = e.clientX - rect.left;
+                points[draggingPoint].y = e.clientY - rect.top;
+                draw();
+            }
+        });
+
+        // 鼠标松开或离开画布：停止拖拽
+        canvas.addEventListener('mouseup', () => { draggingPoint = null; });
+        canvas.addEventListener('mouseleave', () => { draggingPoint = null; });
+
+        // 保存并下载生成的黑底彩色骨架图
+        function saveImage() {
+            const link = document.createElement('a');
+            link.download = 'my_custom_pose.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        function resetPose() {
+            points = JSON.parse(JSON.stringify(defaultPoints));
+            draw();
+        }
+
+        // 初始化绘制
+        draw();
+    </script>
+</body>
+</html>

@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>细粒度姿态可控生成 - OpenPose 编辑器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #1a202c; color: #e2e8f0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .canvas-container { position: relative; display: inline-block; background-color: #000; border-radius: 0.5rem; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3); }
+        canvas { display: block; cursor: crosshair; }
+        #bg-image { position: absolute; top: 0; left: 0; opacity: 0.5; pointer-events: none; max-width: 100%; max-height: 100%; object-fit: contain; display: none; }
+    </style>
+</head>
+<body class="min-h-screen p-6 flex flex-col items-center">
+
+    <div class="w-full max-w-6xl">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-bold text-white mb-2">细粒度姿态可控生成系统</h1>
+            <p class="text-gray-400">提取 OpenPose 骨架 -> 手动拖拽调整 -> ControlNet 重新生成</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- 左侧：控制面板 -->
+            <div class="bg-gray-800 p-6 rounded-xl shadow-lg flex flex-col gap-4">
+                <h2 class="text-xl font-semibold mb-2 text-white border-b border-gray-700 pb-2">1. 上传与提取</h2>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">上传参考人体图</label>
+                    <input type="file" id="image-upload" accept="image/*" class="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 bg-gray-700 rounded-md cursor-pointer">
+                </div>
+
+                <button id="extract-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    提取初始骨架
+                </button>
+
+                <h2 class="text-xl font-semibold mt-6 mb-2 text-white border-b border-gray-700 pb-2">2. 生成设置</h2>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-1">正面提示词 (Prompt)</label>
+                    <textarea id="prompt" rows="3" class="w-full bg-gray-700 border border-gray-600 rounded-md p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="例如：1girl, full body, masterpiece, best quality, highly detailed..."></textarea>
+                </div>
+
+                <button id="generate-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded shadow-lg transition-colors mt-4 text-lg">
+                    ✨ 依据当前骨架生成图像
+                </button>
+                
+                <div class="text-xs text-gray-400 mt-2 text-center">
+                    注：实际项目中，此按钮将把 Canvas 图像发送至 ComfyUI API。
+                </div>
+            </div>
+
+            <!-- 中间：骨架编辑区域 -->
+            <div class="bg-gray-800 p-6 rounded-xl shadow-lg flex flex-col items-center justify-center lg:col-span-1">
+                <h2 class="text-xl font-semibold mb-4 text-white w-full text-left">交互式骨架编辑器</h2>
+                <div class="canvas-container relative w-[300px] h-[400px]" id="canvas-wrapper">
+                    <img id="bg-image" src="" alt="Background">
+                    <canvas id="pose-canvas" width="300" height="400"></canvas>
+                </div>
+                <div class="flex gap-4 mt-4 w-full">
+                    <button id="toggle-bg-btn" class="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-1 px-3 rounded text-sm transition-colors">切换底图显示</button>
+                    <button id="reset-btn" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-1 px-3 rounded text-sm transition-colors">重置骨架</button>
+                </div>
+                <p class="text-sm text-gray-400 mt-3 text-center">提示：直接使用鼠标拖拽关节点即可改变姿势。</p>
+            </div>
+
+            <!-- 右侧：生成结果预览 -->
+            <div class="bg-gray-800 p-6 rounded-xl shadow-lg flex flex-col">
+                <h2 class="text-xl font-semibold mb-4 text-white">3. 生成结果</h2>
+                <div class="flex-1 flex items-center justify-center bg-gray-900 rounded-lg border border-gray-700 overflow-hidden relative min-h-[400px]">
+                    <div id="loading-spinner" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-900 bg-opacity-80 z-10 hidden">
+                        <svg class="animate-spin h-10 w-10 text-blue-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="text-blue-400 font-medium">模型推理中...</span>
+                    </div>
+                    <img id="result-image" src="" alt="生成结果将显示在这里" class="max-w-full max-h-full object-contain hidden">
+                    <span id="result-placeholder" class="text-gray-500 text-center px-4">生成的图像将在此处显示</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- OpenPose 骨架数据定义 (COCO 18点格式) ---
+        // 关键点颜色 (BGR 转 RGB 用于 Canvas)
+        const colors = [
+            [255, 0, 0], [255, 85, 0], [255, 170, 0], [255, 255, 0], [170, 255, 0], 
+            [85, 255, 0], [0, 255, 0], [0, 255, 85], [0, 255, 170], [0, 255, 255], 
+            [0, 170, 255], [0, 85, 255], [0, 0, 255], [85, 0, 255], [170, 0, 255], 
+            [255, 0, 255], [255, 0, 170], [255, 0, 85]
+        ];
+
+        // 连线关系和颜色
+        const limbs = [
+            [1, 2], [1, 5], [2, 3], [3, 4], [5, 6], [6, 7], [1, 8], [8, 9], [9, 10], 
+            [1, 11], [11, 12], [12, 13], [1, 0], [0, 14], [14, 16], [0, 15], [15, 17]
+        ];
+        const limbColors = [
+            [255, 0, 0], [255, 85, 0], [255, 170, 0], [255, 255, 0], [170, 255, 0], 
+            [85, 255, 0], [0, 255, 0], [0, 255, 85], [0, 255, 170], [0, 255, 255], 
+            [0, 170, 255], [0, 85, 255], [0, 0, 255], [85, 0, 255], [170, 0, 255], 
+            [255, 0, 255], [255, 0, 170]
+        ];
+
+        // 默认 T-pose 关键点坐标 (x, y) 归一化比例 0~1
+        const defaultKeypoints = [
+            {x: 0.5, y: 0.15}, // 0: Nose
+            {x: 0.5, y: 0.25}, // 1: Neck
+            {x: 0.4, y: 0.25}, // 2: RShoulder
+            {x: 0.35, y: 0.4}, // 3: RElbow
+            {x: 0.3, y: 0.55}, // 4: RWrist
+            {x: 0.6, y: 0.25}, // 5: LShoulder
+            {x: 0.65, y: 0.4}, // 6: LElbow
+            {x: 0.7, y: 0.55}, // 7: LWrist
+            {x: 0.45, y: 0.5}, // 8: RHip
+            {x: 0.45, y: 0.7}, // 9: RKnee
+            {x: 0.45, y: 0.9}, // 10: RAnkle
+            {x: 0.55, y: 0.5}, // 11: LHip
+            {x: 0.55, y: 0.7}, // 12: LKnee
+            {x: 0.55, y: 0.9}, // 13: LAnkle
+            {x: 0.48, y: 0.13},// 14: REye
+            {x: 0.52, y: 0.13},// 15: LEye
+            {x: 0.45, y: 0.14},// 16: REar
+            {x: 0.55, y: 0.14} // 17: LEar
+        ];
+
+        let currentKeypoints = [];
+        
+        // --- DOM 元素引用与状态 ---
+        const imageUpload = document.getElementById('image-upload');
+        const extractBtn = document.getElementById('extract-btn');
+        const generateBtn = document.getElementById('generate-btn');
+        const bgImage = document.getElementById('bg-image');
+        const toggleBgBtn = document.getElementById('toggle-bg-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        let bgImageVisible = true;
+
+        // --- Canvas 交互逻辑 ---
+        const canvas = document.getElementById('pose-canvas');
+        const ctx = canvas.getContext('2d');
+        let width = canvas.width;
+        let height = canvas.height;
+        
+        let isDragging = false;
+        let dragPointIndex = -1;
+        const DRAG_RADIUS = 15; // 点击判定半径
+
+        function initPose() {
+            currentKeypoints = defaultKeypoints.map(pt => ({
+                x: pt.x * width,
+                y: pt.y * height
+            }));
+            drawPose();
+        }
+
+        function drawPose() {
+            // 清空画布 (背景黑色)
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, width, height);
+
+            // 1. 绘制连线 (Limbs)
+            ctx.lineWidth = 6;
+            limbs.forEach((limb, i) => {
+                const pt1 = currentKeypoints[limb[0]];
+                const pt2 = currentKeypoints[limb[1]];
+                if (pt1 && pt2) {
+                    ctx.beginPath();
+                    ctx.moveTo(pt1.x, pt1.y);
+                    ctx.lineTo(pt2.x, pt2.y);
+                    const color = limbColors[i];
+                    ctx.strokeStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+                    ctx.stroke();
+                }
+            });
+
+            // 2. 绘制关键点 (Keypoints)
+            currentKeypoints.forEach((pt, i) => {
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, 5, 0, 2 * Math.PI);
+                const color = colors[i];
+                ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+                ctx.fill();
+                
+                // 拖拽高亮
+                if (i === dragPointIndex) {
+                    ctx.beginPath();
+                    ctx.arc(pt.x, pt.y, 8, 0, 2 * Math.PI);
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+            });
+        }
+
+        // 获取鼠标在 Canvas 中的相对坐标
+        function getMousePos(evt) {
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+            return {
+                x: (evt.clientX - rect.left) * scaleX,
+                y: (evt.clientY - rect.top) * scaleY
+            };
+        }
+
+        // 事件监听
+        canvas.addEventListener('mousedown', (e) => {
+            const pos = getMousePos(e);
+            let minDist = DRAG_RADIUS;
+            dragPointIndex = -1;
+            
+            currentKeypoints.forEach((pt, i) => {
+                const dist = Math.hypot(pt.x - pos.x, pt.y - pos.y);
+                if (dist < minDist) {
+                    minDist = dist;
+                    dragPointIndex = i;
+                }
+            });
+
+            if (dragPointIndex !== -1) {
+                isDragging = true;
+                drawPose();
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDragging && dragPointIndex !== -1) {
+                const pos = getMousePos(e);
+                currentKeypoints[dragPointIndex].x = pos.x;
+                currentKeypoints[dragPointIndex].y = pos.y;
+                drawPose();
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+            dragPointIndex = -1;
+            drawPose();
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            isDragging = false;
+            dragPointIndex = -1;
+            drawPose();
+        });
+
+        // --- UI 及 API 交互逻辑 ---
+        
+        // 1. 上传图片处理
+        imageUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    bgImage.src = event.target.result;
+                    bgImage.style.display = bgImageVisible ? 'block' : 'none';
+                    extractBtn.disabled = false;
+                    
+                    // 根据图片比例调整 canvas
+                    const img = new Image();
+                    img.onload = () => {
+                        const wrapper = document.getElementById('canvas-wrapper');
+                        const ratio = img.height / img.width;
+                        const newHeight = wrapper.offsetWidth * ratio;
+                        canvas.width = wrapper.offsetWidth;
+                        canvas.height = newHeight;
+                        width = canvas.width;
+                        height = canvas.height;
+                        
+                        // 初始化居中且比例合适的骨架
+                        initPose(); 
+                    }
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 2. 提取骨架 API 请求
+        extractBtn.addEventListener('click', async () => {
+            const fileInput = document.getElementById('image-upload');
+            if (!fileInput.files.length) {
+                alert("请先上传图片！");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            extractBtn.disabled = true;
+            extractBtn.innerText = "提取中...";
+
+            try {
+                // 调用后端接口 1：提取骨架坐标
+                const response = await fetch('http://127.0.0.1:8000/api/extract_pose', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const data = await response.json();
+                if (data.status === "success" && data.keypoints) {
+                    // 将后端返回的归一化坐标转换为 Canvas 实际坐标
+                    currentKeypoints = data.keypoints.map(pt => ({
+                        x: pt.x * width,
+                        y: pt.y * height
+                    }));
+                    drawPose();
+                    alert("骨架提取成功！你可以开始拖拽调整了。");
+                }
+            } catch (error) {
+                console.error("提取失败:", error);
+                alert("请求后端失败，请确保 Python 后端已启动于端口 8000。");
+                initPose(); // 失败时回退到默认骨架
+            } finally {
+                extractBtn.disabled = false;
+                extractBtn.innerText = "重新提取骨架";
+            }
+        });
+
+        // 3. 重置与背景切换按钮
+        resetBtn.addEventListener('click', initPose);
+
+        toggleBgBtn.addEventListener('click', () => {
+            bgImageVisible = !bgImageVisible;
+            bgImage.style.display = bgImageVisible && bgImage.src ? 'block' : 'none';
+        });
+
+        // 4. 提交生成 API 请求
+        generateBtn.addEventListener('click', async () => {
+            // 获取当前 Canvas 的 Base64 数据 (这就是你要喂给 ControlNet 的 OpenPose 图)
+            const poseBase64 = canvas.toDataURL('image/png');
+            const prompt = document.getElementById('prompt').value || 'A highly detailed person, best quality';
+            
+            console.log('准备发送给 API 的数据:', { prompt, poseBase64: poseBase64.substring(0, 50) + '...' });
+
+            const loading = document.getElementById('loading-spinner');
+            const resultImg = document.getElementById('result-image');
+            const placeholder = document.getElementById('result-placeholder');
+            
+            loading.classList.remove('hidden');
+            resultImg.classList.add('hidden');
+            placeholder.classList.add('hidden');
+
+            try {
+                // 调用后端接口 2：发送骨架和提示词进行生成
+                const response = await fetch('http://127.0.0.1:8000/api/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        pose_base64: poseBase64
+                    })
+                });
+
+                const data = await response.json();
+                if (data.status === "success") {
+                    resultImg.src = data.image_url; 
+                    resultImg.classList.remove('hidden');
+                } else {
+                    alert("生成失败：" + data.message);
+                    placeholder.classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error("生成失败:", error);
+                alert("请求后端生成失败，请检查后端运行状态。");
+                placeholder.classList.remove('hidden');
+            } finally {
+                loading.classList.add('hidden');
+            }
+        });
+
+        // 初始渲染空骨架
+        initPose();
+
+    </script>
+</body>
+</html>

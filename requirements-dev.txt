@@ -1,0 +1,3 @@
+# 开发 / 测试依赖（CI 只装这些，不装 torch 等大依赖）
+-r requirements.txt
+pytest>=8.0.0

@@ -1,0 +1,30 @@
+# 细粒度姿态可控的人体图像生成 —— Python 依赖
+# 建议：Python 3.10 ~ 3.12（3.13 下 controlnet_aux 的 mediapipe 依赖可能报错）；GPU 环境需先按 https://pytorch.org 安装对应 CUDA 版 torch
+# 安装：pip install -r requirements.txt
+
+# --- 深度学习框架 ---
+torch>=2.1.0
+torchvision>=0.16.0
+accelerate>=0.26.0
+safetensors>=0.4.0
+transformers>=4.38.0
+
+# --- 扩散模型生成 ---
+diffusers>=0.30.0
+omegaconf>=2.3.0          # from_single_file 加载本地 .safetensors 时需要
+huggingface-hub>=0.24.0
+
+# --- ControlNet 姿态预处理器（OpenPose 检测）---
+controlnet-aux>=0.0.9
+opencv-python>=4.8.0
+
+# --- 图像处理与 Web UI ---
+numpy>=1.24.0
+Pillow>=10.0.0
+gradio>=3.50.0,<6            # 实测 3.50.2 与 4.x 均可用
+
+# --- 可选：FastAPI 分离式后端 (server_api.py) ---
+fastapi>=0.110.0
+uvicorn>=0.29.0
+pydantic>=2.6.0
+python-multipart>=0.0.9
